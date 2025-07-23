@@ -63,12 +63,13 @@ checkout(Host, Port, Transport, Client) ->
   Requester = self(),
   try
     do_checkout(Requester, Host, Port, Transport, Client)
-  catch _:_ ->
+  catch _:Error ->
+    ?report_trace("pool: checkout failure", [{error, Error}]),
     {error, checkout_failure}
   end.
 
 do_checkout(Requester, Host, _Port, Transport, #client{options=Opts,
-  mod_metrics=Metrics}=Client) ->
+                                                       mod_metrics=Metrics}=Client) ->
   ConnectTimeout = proplists:get_value(connect_timeout, Opts, 8000),
   %% Fall back to using connect_timeout if checkout_timeout is not set
   CheckoutTimeout = proplists:get_value(checkout_timeout, Opts, ConnectTimeout),
@@ -78,7 +79,6 @@ do_checkout(Requester, Host, _Port, Transport, #client{options=Opts,
   Pool = find_pool(PoolName, Opts),
   case catch gen_server:call(Pool, {checkout, Connection, Requester, RequestRef}, CheckoutTimeout) of
     {ok, Socket, Owner} ->
-
       %% stats
       ?report_debug("reuse a connection", [{pool, PoolName}]),
       _ = metrics:update_meter(Metrics, [hackney_pool, PoolName, take_rate], 1),
@@ -97,7 +97,8 @@ do_checkout(Requester, Host, _Port, Transport, #client{options=Opts,
               _ = metrics:increment_counter(Metrics, [hackney_pool, Host, new_connection]),
               {ok, {PoolName, RequestRef, Connection, Owner, Transport}, Socket};
             Error ->
-              catch hackney_connection:close(Connection, Socket),
+              %% Ensure socket is properly closed on controlling_process error
+              _ = catch hackney_connection:close(Connection, Socket),
               _ = metrics:increment_counter(Metrics, [hackney, Host, connect_error]),
               Error
            end;
@@ -105,7 +106,7 @@ do_checkout(Requester, Host, _Port, Transport, #client{options=Opts,
           _ = metrics:increment_counter(Metrics, [hackney, Host, connect_timeout]),
           {error, timeout};
         Error ->
-          ?report_trace("connect error", []),
+          ?report_trace("connect error", [{pool, PoolName}, {error, Error}]),
           _ = metrics:increment_counter(Metrics, [hackney, Host, connect_error]),
           Error
       end;
@@ -125,7 +126,8 @@ checkin({_Name, Ref, Connection, Owner, Transport}, Socket) ->
         ok ->
           gen_server:call(Owner, {checkin, Ref, Connection, Socket, Transport}, infinity);
         _Error ->
-          catch hackney_connection:close(Connection,Socket),
+          %% Ensure socket is properly closed on controlling_process error
+          _ = catch hackney_connection:close(Connection, Socket),
           ok
       end;
     false ->
@@ -412,9 +414,15 @@ find_connection(Connection, Pid, #state{connections=Conns, sockets=Sockets}=Stat
               %% something happened here normally the PID died,
               %% but make sure we still have the control of the
               %% process
-              catch hackney_connection:controlling_process(Connection, S, self()),
-              %% and then close it
-              find_connection(Connection, Pid, remove_socket(S,  State));
+              case catch hackney_connection:controlling_process(Connection, S, self()) of
+                ok ->
+                  %% Successfully regained control, now remove the socket
+                  find_connection(Connection, Pid, remove_socket(S, State));
+                _ ->
+                  %% Failed to regain control, force close and remove
+                  _ = catch hackney_connection:close(Connection, S),
+                  find_connection(Connection, Pid, remove_socket(S, State))
+              end;
             _Else ->
               find_connection(Connection, Pid, remove_socket(S, State))
           end;
@@ -465,12 +473,18 @@ update_connections(Sockets, Key, Connections) ->
 cancel_timer(Socket, Timer) ->
   case erlang:cancel_timer(Timer) of
     false ->
+      %% Timer already fired, must drain the timeout message
       receive
         {timeout, Socket} -> ok
       after
-        0 -> ok
+        100 -> 
+          %% Safety timeout - if message doesn't arrive, continue anyway
+          ok
       end;
-    _ -> ok
+    _ -> 
+      %% Timer was successfully cancelled, no message should exist
+      %% Don't drain messages to avoid consuming legitimate timeout messages
+      ok
   end.
 
 %------------------------------------------------------------------------------

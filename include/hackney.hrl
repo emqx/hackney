@@ -1,6 +1,5 @@
 -define(RECV_TIMEOUT, 5000).
 
-
 -record(connection, {transport,
                      host,
                      port,
@@ -57,3 +56,7 @@
 -define(CONFIG, hackney_config).
 
 -define(CONNECTIONS, hackney_connections).
+
+-define(HTTP_PROXY_ENV_VARS, ["http_proxy", "HTTP_PROXY", "all_proxy", "ALL_PROXY"]).
+-define(HTTPS_PROXY_ENV_VARS, ["https_proxy", "HTTPS_PROXY", "all_proxy", "ALL_PROXY"]).
+-define(HTTP_NO_PROXY_ENV_VARS, ["no_proxy", "NO_PROXY"]).

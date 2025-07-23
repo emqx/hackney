@@ -2,9 +2,9 @@
 
 # hackney - HTTP client library in Erlang #
 
-Copyright (c) 2012-2022 Benoît Chesneau.
+Copyright (c) 2012-2025 Benoît Chesneau.
 
-__Version:__ 1.18.1
+__Version:__ 1.24.1
 
 # hackney
 
@@ -29,14 +29,7 @@ __Version:__ 1.18.1
 - Optional socket pool
 - REST syntax: `hackney:Method(URL)` (where a method can be get, post, put, delete, ...)
 
-**Supported versions** of Erlang are R16B03-1, 17.3.4 and above. It is
-reported to work with R14B04 and R15B03-1.
-
-**WARNING**: Erlang 17.3 and 17.3.1 have a broken SSL module which
-prevents the usage of SSL connection with some servers. You **must** upgrade
-in that case to Erlang
-[17.3.4](https://github.com/erlang/otp/commit/9417f044ee3c291c2ea343c203aebdcc40597226)
-or superior.
+**Supported versions** of Erlang are 25.3 and above. 
 
 > Note: This is a work in progress, see the
 [TODO](http://github.com/benoitc/hackney/blob/master/TODO.md) for more
@@ -44,18 +37,18 @@ information on what still needs to be done.
 
 #### Useful modules are:
 
-- [`hackney`](http://github.com/benoitc/hackney/blob/master/doc/hackney.md): main module. It contains all HTTP client functions.
-- [`hackney_http`](http://github.com/benoitc/hackney/blob/master/doc/hackney_http.md): HTTP parser in pure Erlang. This parser is able
+- [`hackney`](https://hexdocs.pm/hackney/hackney.html): main module. It contains all HTTP client functions.
+- [`hackney_http`](https://hexdocs.pm/hackney/hackney_http.html): HTTP parser in pure Erlang. This parser is able
 to parse HTTP responses and requests in a streaming fashion. If not set
 it will be autodetected if it's a request or a response that's needed.
 
-- [`hackney_headers`](http://github.com/benoitc/hackney/blob/master/doc/hackney_headers.md) Module to manipulate HTTP headers.
-- [`hackney_cookie`](http://github.com/benoitc/hackney/blob/master/doc/hackney_cookie.md): Module to manipulate cookies.
-- [`hackney_multipart`](http://github.com/benoitc/hackney/blob/master/doc/hackney_multipart.md): Module to encode/decode multipart.
-- [`hackney_url`](http://github.com/benoitc/hackney/blob/master/doc/hackney_url.md): Module to parse and create URIs.
-- [`hackney_date`](http://github.com/benoitc/hackney/blob/master/doc/hackney_date.md): Module to parse HTTP dates.
+- [`hackney_headers`](https://hexdocs.pm/hackney/hackney_headers.html) Module to manipulate HTTP headers.
+- [`hackney_cookie`](https://hexdocs.pm/hackney/hackney_cookie.html): Module to manipulate cookies.
+- [`hackney_multipart`](https://hexdocs.pm/hackney/hackney_multipart.html): Module to encode/decode multipart.
+- [`hackney_url`](https://hexdocs.pm/hackney/hackney_url.html): Module to parse and create URIs.
+- [`hackney_date`](https://hexdocs.pm/hackney/hackney_date.html): Module to parse HTTP dates.
 
-Read the [NEWS](https://raw.github.com/benoitc/hackney/master/NEWS.md) file
+Read the [NEWS](https://hexdocs.pm/hackney/news.html) file
 to get the last changelog.
 
 ## Installation
@@ -239,9 +232,9 @@ the request body:
   - `{file, Path, Name, ExtraHeaders}` : to send a file with DOM element name and extra headers
   - `{Name, Content}`: to send a full part
   - `{Name, Content, ExtraHeaders}`: to send a full part
-  - `{mp_mixed, Name, MixedBoundary}`: To notify we start a part with a
+  - `{mp_mixed, Name, MixedBoundary}`: To notify we start a part with 
     a mixed multipart content
-  - `{mp_mixed_eof, MixedBoundary}`: To notify we end a part with a a
+  - `{mp_mixed_eof, MixedBoundary}`: To notify we end a part with a
     mixed multipart content
 - `{file, File}` : To send a file
 - Bin: To send a binary or an iolist
@@ -395,9 +388,9 @@ behaviour.
 
 See for example the
 [hackney_disp](https://github.com/benoitc/hackney_disp) a load-balanced
-Pool dispatcher based on dispcount].
+Pool dispatcher based on dispcount.
 
-> Note: for now you can`t force the pool handler / client.
+> Note: for now you can't force the pool handler / client.
 
 ### Automatically follow a redirection
 
@@ -575,38 +568,3 @@ $ gunicorn --daemon --pid httpbin.pid httpbin:app
 $ rebar3 eunit
 $ kill `cat httpbin.pid`
 ```
-
-
-## Modules ##
-
-
-<table width="100%" border="0" summary="list of modules">
-<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney.md" class="module">hackney</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_app.md" class="module">hackney_app</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_bstr.md" class="module">hackney_bstr</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_connect.md" class="module">hackney_connect</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_connection.md" class="module">hackney_connection</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_connections.md" class="module">hackney_connections</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_cookie.md" class="module">hackney_cookie</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_date.md" class="module">hackney_date</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_headers.md" class="module">hackney_headers</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_headers_new.md" class="module">hackney_headers_new</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_http.md" class="module">hackney_http</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_http_connect.md" class="module">hackney_http_connect</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_local_tcp.md" class="module">hackney_local_tcp</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_manager.md" class="module">hackney_manager</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_metrics.md" class="module">hackney_metrics</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_multipart.md" class="module">hackney_multipart</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_pool.md" class="module">hackney_pool</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_pool_handler.md" class="module">hackney_pool_handler</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_request.md" class="module">hackney_request</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_response.md" class="module">hackney_response</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_socks5.md" class="module">hackney_socks5</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_ssl.md" class="module">hackney_ssl</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_stream.md" class="module">hackney_stream</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_sup.md" class="module">hackney_sup</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_tcp.md" class="module">hackney_tcp</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_trace.md" class="module">hackney_trace</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_url.md" class="module">hackney_url</a></td></tr>
-<tr><td><a href="http://github.com/benoitc/hackney/blob/master/doc/hackney_util.md" class="module">hackney_util</a></td></tr></table>
-

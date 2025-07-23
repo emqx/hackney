@@ -286,6 +286,32 @@ parse_url_test_() ->
                           port = 80,
                           user = <<"">>,
                           password = <<"">>}
+            },
+            {<<"https://example.com/foo/bar">>,
+             #hackney_url{transport = hackney_ssl,
+                          scheme = https,
+                          netloc = <<"example.com">>,
+                          raw_path = <<"/foo/bar">>,
+                          path = <<"/foo/bar">>,
+                          qs = <<>>,
+                          fragment = <<>>,
+                          host = "example.com",
+                          port = 443,
+                          user = <<>>,
+                          password = <<>>}
+            },
+            {<<"http://127.0.0.1?@127.2.2.2/">>,
+             #hackney_url{transport = hackney_tcp,
+                          scheme = http,
+                          netloc = <<"127.0.0.1">>,
+                          raw_path = <<"?@127.2.2.2/">>,
+                          path = <<>>,
+                          qs = <<"@127.2.2.2/">>,
+                          fragment = <<>>,
+                          host = "127.0.0.1",
+                          port = 80,
+                          user = <<>>,
+                          password = <<>>}
             }
             ],
     [{V, fun() -> R = hackney_url:parse_url(V) end} || {V, R} <- Tests].
@@ -382,7 +408,8 @@ pathencode_test_() ->
             {<<"/id/name:107/name2;p=1,3">>, <<"/id/name:107/name2;p=1,3">>},
             {<<"/@foobar">>, <<"/@foobar">>},
             {<<"/500x720/filters:quality(75):format(jpg)/spree/product/s/p/spree2018september12picslgzh0650.jpg">>,
-             <<"/500x720/filters:quality(75):format(jpg)/spree/product/s/p/spree2018september12picslgzh0650.jpg">>}
+             <<"/500x720/filters:quality(75):format(jpg)/spree/product/s/p/spree2018september12picslgzh0650.jpg">>},
+            {<<"/1/indexes/*/queries">>, <<"/1/indexes/*/queries">>}
             ],
     [{V, fun() -> R = hackney_url:pathencode(V) end} || {V, R} <- Tests].
 
