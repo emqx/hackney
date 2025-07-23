@@ -111,13 +111,24 @@ close_request(#client{}=Client) ->
 
   %% remove the request
   erase(Ref),
-  ets:delete(?MODULE, Ref),
+  catch ets:delete(?MODULE, Ref),
 
   %% stop to monitor the request
   ok = gen_server:cast(?MODULE, {cancel_request, Ref}),
 
   case Status of
-    done -> ok;
+    done when Socket /= nil ->
+      %% Connection completed successfully, return to pool if using one
+      case Client#client.socket_ref of
+        nil ->
+          %% Not using pool, close the socket
+          catch Transport:close(Socket);
+        SocketRef ->
+          %% Return to pool
+          Handler = Client#client.pool_handler,
+          catch Handler:checkin(SocketRef, Socket)
+      end,
+      ok;
     _ when Socket /= nil ->
         catch Transport:controlling_process(Socket, self()),
         catch Transport:close(Socket),
@@ -179,7 +190,7 @@ start_async_response(Ref) ->
   end.
 
 stop_async_response(Ref) ->
-  gen_server:call(?MODULE, {stop_async_response, Ref, self()}, infinity).
+  gen_server:call(?MODULE, {stop_async_response, Ref, self()}, 30000).
 
 async_response_pid(Ref) ->
   case ets:lookup(?REFS, Ref) of
@@ -213,7 +224,7 @@ get_state(Ref) ->
           %% owner can handle it.
           put(Ref, State),
           %% delete the state, from ets
-          ets:delete(?MODULE, Ref),
+          catch ets:delete(?MODULE, Ref),
           State
       end;
     State ->
@@ -241,10 +252,10 @@ store_state(Ref, NState) ->
 
 take_control(Ref, NState) ->
   %% maybe delete the state from ets
-  ets:delete(?MODULE, Ref),
+  catch ets:delete(?MODULE, Ref),
   %% add the state to the current context
   put(Ref, NState),
-  gen_server:call(?MODULE, {take_control, Ref, NState}, infinity).
+  gen_server:call(?MODULE, {take_control, Ref, NState}, 30000).
 
 handle_error(#client{request_ref=Ref, dynamic=true}) ->
   close_request(Ref);
@@ -338,14 +349,14 @@ handle_call({stop_async_response, Ref, To}, _From, State) ->
       %% there is no async request to handle, just return
       {reply, {ok, Ref}, State};
     [{Ref, {Owner, Stream, Info}}] ->
+      %% Monitor the stream process to avoid race conditions
+      MonitorRef = erlang:monitor(process, Stream),
       %% tell to the stream to stop
       Stream ! {Ref, stop_async, self()},
       receive
         {Ref, ok} ->
-          %% if the stream return, we unlink it and update the
-          %% state. if we stop the async request and want to use it
-          %% in another process, make sure to unlink the old owner
-          %% and link the new one.
+          %% Clean shutdown received
+          erlang:demonitor(MonitorRef, [flush]),
           unlink(Stream),
           ets:insert(?REFS, {Ref, {To, nil, Info}}),
           Pids1 = dict:erase(Stream, State#mstate.pids),
@@ -355,9 +366,29 @@ handle_call({stop_async_response, Ref, To}, _From, State) ->
                     _ ->
                       track_owner(To, Ref, untrack_owner(Owner, Ref, Pids1))
                   end,
+          {reply, {ok, Ref}, State#mstate{pids=Pids2}};
+        {'DOWN', MonitorRef, process, Stream, _Reason} ->
+          %% Stream died before responding, clean up and continue
+          ets:insert(?REFS, {Ref, {To, nil, Info}}),
+          Pids1 = dict:erase(Stream, State#mstate.pids),
+          Pids2 = case To of
+                    Owner -> Pids1;
+                    _ ->
+                      track_owner(To, Ref, untrack_owner(Owner, Ref, Pids1))
+                  end,
           {reply, {ok, Ref}, State#mstate{pids=Pids2}}
       after 5000 ->
-        {reply, {error, timeout}, State}
+        %% Timeout - force cleanup
+        erlang:demonitor(MonitorRef, [flush]),
+        catch unlink(Stream),
+        ets:insert(?REFS, {Ref, {To, nil, Info}}),
+        Pids1 = dict:erase(Stream, State#mstate.pids),
+        Pids2 = case To of
+                  Owner -> Pids1;
+                  _ ->
+                    track_owner(To, Ref, untrack_owner(Owner, Ref, Pids1))
+                end,
+        {reply, {error, timeout}, State#mstate{pids=Pids2}}
       end
   end;
 
@@ -382,7 +413,7 @@ handle_cast({cancel_request, Ref}, State) ->
     [{Ref, {Owner, nil, #request_info{pool=Pool}=Info}}] ->
       %% no stream just cancel the request and untrack the owner.
       Pids2 = untrack_owner(Owner, Ref, State#mstate.pids),
-      ets:delete(?REFS, Ref),
+      catch ets:delete(?REFS, Ref),
       %% notify the pool that the request have been canceled
       PoolHandler:notify(Pool, {'DOWN', Ref, request, Owner, cancel}),
       %% update metrics
@@ -392,7 +423,7 @@ handle_cast({cancel_request, Ref}, State) ->
       %% unlink the stream and untrack the owner
       unlink(Stream),
       Pids2 = dict:erase(Stream, untrack_owner(Owner, Ref, State#mstate.pids)),
-      ets:delete(?REFS, Ref),
+      catch ets:delete(?REFS, Ref),
       %% notify the pool that the request have been canceled
       _ = PoolHandler:notify(Pool, {'DOWN', Ref, request, Owner, cancel}),
       %% update metrics
@@ -509,8 +540,8 @@ clean_requests([Ref | Rest], Pid, Reason, PoolHandler, State) ->
       %% cleanup socket
       ok = cleanup_socket(Ref),
       %% remove the reference
-      ets:delete(?REFS, Ref),
-      ets:delete(?MODULE, Ref),
+      catch ets:delete(?REFS, Ref),
+      catch ets:delete(?MODULE, Ref),
       %% notify the pool that the request have been canceled
       PoolHandler:notify(Pool, {'DOWN', Ref, request, Pid, Reason}),
       %% update metrics
@@ -525,8 +556,8 @@ clean_requests([Ref | Rest], Pid, Reason, PoolHandler, State) ->
       %% cleanup socket
       ok = cleanup_socket(Ref),
       %% remove the reference
-      ets:delete(?REFS, Ref),
-      ets:delete(?MODULE, Ref),
+      catch ets:delete(?REFS, Ref),
+      catch ets:delete(?MODULE, Ref),
       %% notify the pool that the request have been canceled
       PoolHandler:notify(Pool, {'DOWN', Ref, request, Pid, Reason}),
       %% update metrics
@@ -537,28 +568,29 @@ clean_requests([Ref | Rest], Pid, Reason, PoolHandler, State) ->
 clean_requests([], _Pid, _Reason, _PoolHandler, State) ->
   State.
 
-monitor_child(Pid) ->
-  erlang:monitor(process, Pid),
-  unlink(Pid),
-  receive
-    {'EXIT', Pid, _} ->
-      true
-  after 0 ->
-    true
-  end.
-
 terminate_async_response(StreamPid) ->
   terminate_async_response(StreamPid, shutdown).
 
 terminate_async_response(StreamPid, Reason) ->
-  _ = monitor_child(StreamPid),
+  MonitorRef = erlang:monitor(process, StreamPid),
+  unlink(StreamPid),
   exit(StreamPid, Reason),
-  wait_async_response(StreamPid).
-
-wait_async_response(Stream) ->
   receive
-    {'DOWN', _MRef, process, Stream, _Reason} ->
+    {'DOWN', MonitorRef, process, StreamPid, _} ->
+      erlang:demonitor(MonitorRef, [flush]),
       ok
+  after 5000 ->
+      %% Force kill if not terminated
+      exit(StreamPid, kill),
+      receive
+        {'DOWN', MonitorRef, process, StreamPid, _} ->
+          erlang:demonitor(MonitorRef, [flush]),
+          ok
+      after 1000 ->
+          %% Process should be dead now, clean up monitor
+          erlang:demonitor(MonitorRef, [flush]),
+          ok  %% Give up if still not dead
+      end
   end.
 
 

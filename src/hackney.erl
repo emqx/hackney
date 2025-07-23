@@ -237,7 +237,11 @@ request(Method, URL, Headers, Body) ->
 %%          redirection for a request</li>
 %%          <li>`{force_redirect, boolean}': false by default, to force the
 %%          redirection even on POST</li>
-%%          <li>`{basic_auth, {binary, binary}}`: HTTP basic auth username and password.</li>
+%%          <li>`{basic_auth, {binary, binary}}`: HTTP basic auth username and password. 
+%%          Only allowed over HTTPS unless {insecure_basic_auth, true} is also set.</li>
+%%          <li>`{insecure_basic_auth, boolean}': false by default. When true, allows 
+%%          basic auth over unencrypted HTTP connections (security risk). 
+%%          Can also be set globally via application:set_env(hackney, insecure_basic_auth, true).</li>
 %%          <li>`{proxy, proxy_options()}': to connect via a proxy.</li>
 %%          <li>`insecure': to perform "insecure" SSL connections and
 %%          transfers without checking the certificate</li>
@@ -311,16 +315,18 @@ request(Method, #hackney_url{}=URL0, Headers0, Body, Options0) ->
   URL = hackney_url:normalize(URL0, PathEncodeFun),
 
   ?report_trace("request", [{method, Method},
-    {url, URL},
-    {headers, Headers0},
-    {body, Body},
-    {options, Options0}]),
+                            {url, URL},
+                            {headers, Headers0},
+                            {body, Body},
+                            {options, Options0}]),
 
   #hackney_url{transport=Transport,
-    host = Host,
-    port = Port,
-    user = User,
-    password = Password} = URL,
+               host = Host,
+               port = Port,
+               user = User,
+               password = Password,
+               scheme = Scheme} = URL,
+
 
   Options = case User of
               <<>> ->
@@ -332,7 +338,7 @@ request(Method, #hackney_url{}=URL0, Headers0, Body, Options0) ->
 
   Headers1 = hackney_headers_new:new(Headers0),
 
-  case maybe_proxy(Transport, Host, Port, Options) of
+  case maybe_proxy(Transport, Scheme, Host, Port, Options) of
     {ok, Ref, AbsolutePath} ->
       Request = make_request(
                   Method, URL, Headers1, Body, Options, AbsolutePath
@@ -615,26 +621,12 @@ make_request(Method, #hackney_url{}=URL, Headers, Body, _, _) ->
   {Method, FinalPath, Headers1, Body}.
 
 
-maybe_proxy(Transport, Host, Port, Options)
+maybe_proxy(Transport, Scheme, Host, Port, Options)
   when is_list(Host), is_integer(Port), is_list(Options) ->
   case proplists:get_value(proxy, Options) of
     Url when is_binary(Url) orelse is_list(Url) ->
       ?report_debug("HTTP proxy request", [{url, Url}]),
-      Url1 = hackney_url:parse_url(Url),
-      #hackney_url{transport = PTransport,
-                   host = ProxyHost,
-                   port = ProxyPort} = hackney_url:normalize(Url1),
-      ProxyAuth = proplists:get_value(proxy_auth, Options),
-      case {Transport, PTransport} of
-        {hackney_ssl, hackney_ssl} -> {error, invalid_proxy_transport};
-        {hackney_ssl, _} ->
-          do_connect(ProxyHost, ProxyPort, ProxyAuth,Transport, Host, Port, Options);
-        _ ->
-          case hackney_connect:connect(Transport, ProxyHost,ProxyPort, Options, true) of
-            {ok, Ref} -> {ok, Ref, true};
-            Error -> Error
-          end
-      end;
+      proxy_from_url(Url, Transport, Host, Port, Options);
     {ProxyHost, ProxyPort} ->
       ?report_debug("HTTP proxy request", [{proxy_host, ProxyHost}, {proxy_port, ProxyPort}]),
       case Transport of
@@ -682,10 +674,166 @@ maybe_proxy(Transport, Host, Port, Options)
       %% connect using a socks5 proxy
       hackney_connect:connect(hackney_socks5, Host, Port, Options1, true);
     _ ->
-      ?report_debug("request without proxy", []),
+      NoProxyEnv = proplists:get_value(
+                     no_proxy_env, Options, application:get_env(hackney, no_proxy_env, false)
+                    ),
+      maybe_proxy_from_env(Transport, Scheme, Host, Port, Options, NoProxyEnv)
+  end.
+
+maybe_proxy_from_env(Transport, _Scheme, Host, Port, Options, true) ->
+  ?report_debug("no proxy env is forced, request without proxy", []),
+  hackney_connect:connect(Transport, Host, Port, Options, true);
+maybe_proxy_from_env(Transport, Scheme, Host, Port, Options, _) ->
+  case get_proxy_env(Scheme) of
+    {ok, Url} ->
+      NoProxyEnv = get_no_proxy_env(),
+      case match_no_proxy_env(NoProxyEnv, Host) of
+        false ->
+          ?report_debug("request with proxy", [{proxy, Url}, {host, Host}]),
+          proxy_from_url(Url, Transport, Host, Port, Options);
+        true ->
+         ?report_debug("request without proxy", []),
+         hackney_connect:connect(Transport, Host, Port, Options, true)
+      end;
+    false ->
+      ?report_debug("no proxy env setup, request without proxy", []),
       hackney_connect:connect(Transport, Host, Port, Options, true)
   end.
 
+proxy_from_url(Url, Transport, Host, Port, Options) ->
+  ?report_debug("HTTP proxy request", [{url, Url}]),
+  Url1 = hackney_url:parse_url(Url),
+  #hackney_url{transport = PTransport,
+               host = ProxyHost,
+               port = ProxyPort} = hackney_url:normalize(Url1),
+  ProxyAuth = proplists:get_value(proxy_auth, Options),
+  case {Transport, PTransport} of
+    {hackney_ssl, hackney_ssl} -> {error, invalid_proxy_transport};
+    {hackney_ssl, _} ->
+      do_connect(ProxyHost, ProxyPort, ProxyAuth,Transport, Host, Port, Options);
+    _ ->
+      case hackney_connect:connect(Transport, ProxyHost,ProxyPort, Options, true) of
+        {ok, Ref} -> {ok, Ref, true};
+        Error -> Error
+      end
+  end.
+
+get_no_proxy_env() ->
+  case application:get_env(hackney, no_proxy) of
+    undefined ->
+      case get_no_proxy_env(?HTTP_NO_PROXY_ENV_VARS) of
+        false ->
+          application:set_env(hackney, no_proxy, false),
+          false;
+        NoProxyEnv ->
+          parse_no_proxy_env(NoProxyEnv, [])
+      end;
+    {ok, NoProxyEnv} ->
+      NoProxyEnv
+  end.
+
+get_no_proxy_env([Key | Rest]) ->
+  case os:getenv(Key) of
+    false -> get_no_proxy_env(Rest);
+    NoProxyStr ->
+      lists:usort(string:tokens(NoProxyStr, ","))
+  end;
+get_no_proxy_env([]) ->
+  false.
+
+parse_no_proxy_env(["*" | _], _Acc) ->
+  application:set_env(hackney, no_proxy, '*'),
+  '*';
+parse_no_proxy_env([S | Rest], Acc) ->
+  try
+    CIDR = hackney_cidr:parse(S),
+    parse_no_proxy_env(Rest, [{cidr, CIDR} | Acc])
+  catch
+    _:_ ->
+      Labels = string:tokens(S, "."),
+      parse_no_proxy_env(Rest, [{host, lists:reverse(Labels)}])
+  end;
+parse_no_proxy_env([], Acc) ->
+  NoProxy = lists:reverse(Acc),
+  application:set_env(hackney, no_proxy, NoProxy),
+  NoProxy.
+
+match_no_proxy_env(false, _Host) -> false;
+match_no_proxy_env('*', _Host) -> true;
+match_no_proxy_env(Patterns, Host) ->
+  do_match_no_proxy_env(Patterns, undefined, undefined, Host).
+
+do_match_no_proxy_env([{cidr, _CIDR} | _]=Patterns, undefined, Labels, Host) ->
+  Addrs = case inet:parse_address(Host) of
+            {ok, Addr} -> [Addr];
+            _ -> getaddrs(Host)
+          end,
+  do_match_no_proxy_env(Patterns, Addrs, Labels, Host);
+do_match_no_proxy_env([{cidr, CIDR} | Rest], Addrs, Labels, Host) ->
+  case test_host_cidr(Addrs, CIDR) of
+    true -> true;
+    false -> do_match_no_proxy_env(Rest, Addrs, Labels, Host)
+  end;
+do_match_no_proxy_env([{host, _Labels} | _] = Patterns, Addrs, undefined, Host) ->
+  HostLabels = string:tokens(Host, "."),
+  do_match_no_proxy_env(Patterns, Addrs, lists:reverse(HostLabels), Host);
+do_match_no_proxy_env([{host, Labels} | Rest], Addrs, HostLabels, Host) ->
+  case test_host_labels(Labels, HostLabels) of
+    true -> true;
+    false -> do_match_no_proxy_env(Rest, Addrs, Labels, Host)
+  end;
+do_match_no_proxy_env([], _, _, _) ->
+  false.
+
+test_host_labels(["*" | R1], [_ | R2]) -> test_host_labels(R1, R2);
+test_host_labels([ A | R1], [A | R2]) -> test_host_labels(R1, R2);
+test_host_labels([], _) -> true;
+test_host_labels(_, _) -> false.
+
+test_host_cidr([Addr, Rest], CIDR) ->
+  case hackney_cidr:contains(CIDR, Addr) of
+    true -> true;
+    false -> test_host_cidr(Rest, CIDR)
+  end;
+test_host_cidr([], _) ->
+  false.
+
+getaddrs(Host) ->
+  IP4Addrs = case inet:getaddrs(Host, inet) of
+               {ok, Addrs} -> Addrs;
+               {error, nxdomain} -> []
+             end,
+  case inet:getaddrs(Host, inet6) of
+    {ok, IP6Addrs} -> [IP6Addrs | IP4Addrs];
+    {error, nxdomain} -> IP4Addrs
+  end.
+
+get_proxy_env(https) ->
+  case application:get_env(hackney, https_proxy) of
+    undefined ->
+      ProxyEnv = do_get_proxy_env(?HTTPS_PROXY_ENV_VARS),
+      application:set_env(hackney, https_proxy, ProxyEnv),
+      ProxyEnv;
+    {ok, Cached} ->
+      Cached
+  end;
+get_proxy_env(S) when S =:= http; S =:= http_unix ->
+  case application:get_env(hackney, http_proxy) of
+    undefined ->
+      ProxyEnv = do_get_proxy_env(?HTTP_PROXY_ENV_VARS),
+      application:set_env(hackney, http_proxy, ProxyEnv),
+      ProxyEnv;
+    {ok, Cached} ->
+      Cached
+  end.
+
+do_get_proxy_env([Var | Rest]) ->
+  case os:getenv(Var) of
+    false -> do_get_proxy_env(Rest);
+    Url -> {ok, Url}
+  end;
+do_get_proxy_env([]) ->
+  false.
 
 do_connect(ProxyHost, ProxyPort, undefined, Transport, Host, Port, Options) ->
   do_connect(ProxyHost, ProxyPort, {undefined, <<>>}, Transport, Host, Port, Options);
@@ -953,8 +1101,35 @@ reply_response(
 reply_response({ok, Status, Headers, #client{request_ref=Ref}=NState}, _State) ->
   case NState#client.with_body of
     false ->
-      hackney_manager:update_state(NState),
-      {ok, Status, Headers, Ref};
+      %% For redirect responses with pools, ensure body is consumed to properly clean up connections
+      IsRedirect = lists:member(Status, [301, 302, 303, 307, 308]),
+      IsPool = hackney_connect:is_pool(NState) /= false,
+      case IsRedirect andalso IsPool of
+        true ->
+          %% Skip the body to ensure proper connection cleanup for pool redirects
+          case hackney_response:skip_body(NState) of
+            {skip, CleanNState} ->
+              %% For pools, the connection cleanup should have happened in skip_body
+              %% Check if this breaks existing API by checking pool name
+              PoolName = proplists:get_value(pool, NState#client.options, default),
+              case PoolName of
+                default ->
+                  %% For default pool, preserve existing API compatibility
+                  hackney_manager:update_state(CleanNState),
+                  {ok, Status, Headers, Ref};
+                _ ->
+                  %% For custom pools, use full cleanup to ensure connection release
+                  maybe_update_req(CleanNState),
+                  {ok, Status, Headers, Ref}
+              end;
+            Error ->
+              hackney_manager:handle_error(NState),
+              Error
+          end;
+        false ->
+          hackney_manager:update_state(NState),
+          {ok, Status, Headers, Ref}
+      end;
     true ->
       reply_with_body(Status, Headers, NState)
   end;
