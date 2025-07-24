@@ -133,12 +133,18 @@ connect(Host, Port, Opts0, Timeout) when is_list(Host), is_integer(Port),
   Now = erlang:monotonic_time(millisecond),
   case hackney_happy:connect(Host, Port, Opts1, Timeout) of
     {ok, Sock} ->
-      Elapsed = erlang:monotonic_time(millisecond) - Now,
-      case Timeout - Elapsed of
-        TimeoutLeft when TimeoutLeft > 0 ->
-          ssl:connect(Sock, SSLOpts, TimeoutLeft);
+      case Timeout of
+        infinity ->
+          ssl:connect(Sock, SSLOpts);
         _ ->
-          {error, timeout}
+          Elapsed = erlang:monotonic_time(millisecond) - Now,
+          case Timeout - Elapsed of
+            TimeoutLeft when TimeoutLeft > 0 ->
+              ssl:connect(Sock, SSLOpts, TimeoutLeft);
+            _ ->
+              gen_tcp:close(Sock),
+              {error, timeout}
+          end
       end;
     Error ->
       Error
