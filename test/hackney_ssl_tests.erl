@@ -70,7 +70,7 @@ googleapis_ssl_opts_test(_) ->
     SSLOpts = [
         {versions, ['tlsv1.2']},
         {verify, verify_peer},
-        {cacertfile, certifi:cacertfile()},
+        {cacertfile, filename:join(filename:dirname(code:which(?MODULE)), "cacerts.pem")},
         {depth, 10},
         {customize_hostname_check, [
             {match_fun, public_key:pkix_verify_hostname_match_fun(https)}

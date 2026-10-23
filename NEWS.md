@@ -1,5 +1,19 @@
 # NEWS
 
+unreleased
+----------
+
+- breaking: drop the `certifi` dependency. The CA certificates to trust are read
+  by `ssl` from the PEM file named by the `cacertfile_path` application
+  environment variable. When it is unset, the operating system anchors are used
+  through `public_key:cacerts_get/0`, and a release without that function
+  supplies none, so `ssl` rejects the options. Set `cacertfile_path` to verify
+  peers against a CA set you control.
+- breaking: drop the `partial_chain` default. It recognised a trust anchor by
+  comparing the chain against the compiled-in `certifi` bundle, which no longer
+  exists. `ssl` matches the chain against the configured CAs itself. Pass your
+  own `partial_chain` in `ssl_options` if you need the previous behaviour.
+
 1.24.1 - 2025-05-26
 -------------------
 
