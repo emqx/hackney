@@ -36,9 +36,8 @@ check_hostname_opts(Host0) ->
    },
   SslOpts = [{verify, verify_peer},
              {depth, 100},
-             {cacerts, certifi:cacerts()},
-             {partial_chain, fun partial_chain/1},
-             {verify_fun, VerifyFun}],
+             {verify_fun, VerifyFun}
+             | cacert_opts()],
 
   check_hostname_opt(Host1, server_name_indication_opt(Host1, SslOpts)).
 
@@ -81,45 +80,36 @@ server_name_indication_opt(Host, Opts) ->
   [{server_name_indication, Host} | Opts].
 -endif.
 
-%% code from rebar3 undert BSD license
-partial_chain(Certs) ->
-  Certs1 = lists:reverse([{Cert, public_key:pkix_decode_cert(Cert, otp)} ||
-                          Cert <- Certs]),
-  case find(fun({_, Cert}) ->
-                check_cert(decoded_cacerts(), Cert)
-            end, Certs1) of
-    {ok, Trusted} ->
-      {trusted_ca, element(1, Trusted)};
+%% @doc Trust anchors for the default peer verification.
+%%
+%% The `cacertfile_path' application environment variable names a PEM file.
+%% `ssl' reads and caches it, so hackney keeps no copy of its own and a
+%% replaced file is picked up without a restart.
+%%
+%% When the variable is not set, the trust anchors of the operating system are
+%% used, where the release provides them. On a release without
+%% `public_key:cacerts_get/0' no anchors are supplied and `ssl' rejects the
+%% options, which is the correct outcome: `verify_peer' with nothing to verify
+%% against must not silently succeed.
+cacert_opts() ->
+  case application:get_env(hackney, cacertfile_path) of
+    {ok, Path} when is_list(Path); is_binary(Path) ->
+      [{cacertfile, Path}];
     _ ->
-      unknown_ca
+      system_cacert_opts()
   end.
 
-
-%% instead of parsing every time, compile this list at runtime
-decoded_cacerts() ->
-  ct_expand:term(
-    lists:foldl(fun(Cert, Acc) ->
-                    Dec = public_key:pkix_decode_cert(Cert, otp),
-                    [hackney_ssl_certificate:public_key_info(Dec) | Acc]
-                end, [], certifi:cacerts())
-   ).
-
-
-check_cert(CACerts, Cert) ->
-  PublicKeyInfo = hackney_ssl_certificate:public_key_info(Cert),
-  lists:member(PublicKeyInfo, CACerts).
-
-
--spec find(fun(), list()) -> {ok, term()} | error.
-find(Fun, [Head|Tail]) when is_function(Fun) ->
-  case Fun(Head) of
-    true ->
-      {ok, Head};
-    false ->
-      find(Fun, Tail)
-  end;
-find(_Fun, []) ->
-  error.
+-ifdef(no_system_cacerts).
+system_cacert_opts() ->
+  [].
+-else.
+system_cacert_opts() ->
+  try
+    [{cacerts, public_key:cacerts_get()}]
+  catch
+    _:_ -> []
+  end.
+-endif.
 
 
 connect(Host, Port, Opts) ->

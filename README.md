@@ -420,10 +420,32 @@ Options = [{follow_redirect, true}, {max_redirect, 5}],
 {ok, Body1} = hackney:body(Ref).
 ```
 
+### Configure the trust anchors
+
+Hackney verifies the peer by default. The CA certificates it trusts come from
+the `cacertfile_path` application environment variable, which is the path of a
+PEM file:
+
+```erlang
+application:set_env(hackney, cacertfile_path, "/etc/ssl/certs/ca-certificates.crt").
+```
+
+Hackney passes the path straight to `ssl`, which reads and caches the file, so
+replacing its contents is picked up without restarting hackney.
+
+When the variable is not set, the trust anchors of the operating system are used
+through `public_key:cacerts_get/0`. On a release without that function, or where
+the operating system exposes no store, no anchors are supplied and `ssl` rejects
+the options rather than accepting any peer.
+
+Hackney no longer bundles a CA set of its own. Earlier versions compiled the
+Mozilla bundle of [certifi](https://hex.pm/packages/certifi) into the library, so
+the trust anchors could only be changed by rebuilding. Pointing
+`cacertfile_path` at a file you control lets you update them, and lets you drop
+a distrusted root without waiting for a new release.
+
 ### Use SSL/TLS with self signed certificates
 
-Hackney uses CA bundles adapted from Mozilla by
-[certifi](https://hex.pm/packages/certifi).
 Recognising an organisation specific (self signed) certificates is possible
 by providing the necessary `ssl_options`. Note that `ssl_options` overrides all
 options passed to the ssl module.
