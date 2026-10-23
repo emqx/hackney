@@ -35,15 +35,24 @@ empty_clen_test_() ->
     }
   }.
 
+%% The default options take their trust anchors from `cacertfile_path'. Point
+%% it at the bundle in the test directory so that these requests do not depend
+%% on the trust store of the machine running the tests, which on OTP 24 does
+%% not exist as far as `public_key' is concerned.
 start() ->
   error_logger:tty(false),
+  ok = application:set_env(hackney, cacertfile_path, cacertfile()),
   {ok, _} = application:ensure_all_started(hackney),
   ok.
 
 stop(_) ->
   application:stop(hackney),
+  ok = application:unset_env(hackney, cacertfile_path),
   error_logger:tty(true),
   ok.
+
+cacertfile() ->
+  filename:join(filename:dirname(code:which(?MODULE)), "cacerts.pem").
 
 wildcard_cert(_) ->
     URL = <<"https://friendpaste.com">>,
@@ -70,7 +79,7 @@ googleapis_ssl_opts_test(_) ->
     SSLOpts = [
         {versions, ['tlsv1.2']},
         {verify, verify_peer},
-        {cacertfile, filename:join(filename:dirname(code:which(?MODULE)), "cacerts.pem")},
+        {cacertfile, cacertfile()},
         {depth, 10},
         {customize_hostname_check, [
             {match_fun, public_key:pkix_verify_hostname_match_fun(https)}
