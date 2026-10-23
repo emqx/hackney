@@ -1,6 +1,6 @@
 # NEWS
 
-unreleased
+2.0.0 (EMQX fork) - 2026-10-23
 ----------
 
 - breaking: drop the `certifi` dependency. The CA certificates to trust are read

@@ -4,8 +4,6 @@
 
 Copyright (c) 2012-2025 Benoît Chesneau.
 
-__Version:__ 1.24.1
-
 # hackney
 
 **hackney** is an HTTP client library for Erlang.
