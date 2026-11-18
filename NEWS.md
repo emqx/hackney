@@ -1,5 +1,10 @@
 # NEWS
 
+1.18.1-2
+--------
+
+- Use standard certificate-path validation with the configured CA certificates.
+
 1.18.1 - 2022-02-03
 -------------------
 
