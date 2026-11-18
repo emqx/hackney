@@ -46,7 +46,6 @@ check_hostname_opts(Host0) ->
   SslOpts = [{verify, verify_peer},
              {depth, 100},
              {cacerts, certifi:cacerts()},
-             {partial_chain, fun partial_chain/1},
              {verify_fun, VerifyFun}],
 
   check_hostname_opt(Host1, server_name_indication_opt(Host1, SslOpts)).
@@ -89,47 +88,6 @@ server_name_indication_opt(_Host, Opts) -> Opts.
 server_name_indication_opt(Host, Opts) ->
   [{server_name_indication, Host} | Opts].
 -endif.
-
-%% code from rebar3 undert BSD license
-partial_chain(Certs) ->
-  Certs1 = lists:reverse([{Cert, public_key:pkix_decode_cert(Cert, otp)} ||
-                          Cert <- Certs]),
-  case find(fun({_, Cert}) ->
-                check_cert(decoded_cacerts(), Cert)
-            end, Certs1) of
-    {ok, Trusted} ->
-      {trusted_ca, element(1, Trusted)};
-    _ ->
-      unknown_ca
-  end.
-
-
-%% instead of parsing every time, compile this list at runtime
-decoded_cacerts() ->
-  ct_expand:term(
-    lists:foldl(fun(Cert, Acc) ->
-                    Dec = public_key:pkix_decode_cert(Cert, otp),
-                    [hackney_ssl_certificate:public_key_info(Dec) | Acc]
-                end, [], certifi:cacerts())
-   ).
-
-
-check_cert(CACerts, Cert) ->
-  PublicKeyInfo = hackney_ssl_certificate:public_key_info(Cert),
-  lists:member(PublicKeyInfo, CACerts).
-
-
--spec find(fun(), list()) -> {ok, term()} | error.
-find(Fun, [Head|Tail]) when is_function(Fun) ->
-  case Fun(Head) of
-    true ->
-      {ok, Head};
-    false ->
-      find(Fun, Tail)
-  end;
-find(_Fun, []) ->
-  error.
-
 
 connect(Host, Port, Opts) ->
   connect(Host, Port, Opts, infinity).
