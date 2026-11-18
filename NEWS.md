@@ -1,7 +1,7 @@
 # NEWS
 
-1.18.3 - unreleased
-------------------
+1.18.1-2 - unreleased
+--------------------
 
 - Use standard certificate-path validation with the configured CA certificates.
 
